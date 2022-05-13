@@ -18,21 +18,21 @@ class Runner:
                     + type(agent).__name__
 
         # Tensorflow 1.X
-        # self.writer = tf.summary.FileWriter(self.path, tf.get_default_graph())
+        self.writer = tf.summary.FileWriter(self.path, tf.get_default_graph())
         # Tensorflow 2.X mit ausgeschalteter eager_execution
         # Alle weiteren tf.summary Aufrufe müssen durch tf.compat.v1.summary ersetzt werden
-        self.writer = tf.compat.v1.summary.FileWriter(self.path, tf.compat.v1.get_default_graph())
+        # self.writer = tf.compat.v1.summary.FileWriter(self.path, tf.compat.v1.get_default_graph())
 
         if not self.train and load_path is not None and os.path.isdir(load_path):
                 self.agent.load_model(load_path)
 
     def summarize(self):
-        # self.writer.add_summary(tf.Summary(
-        #     value=[tf.Summary.Value(tag='Score per Episode', simple_value=self.score)]),
-        #     self.episode
-        # )
-        with self.writer.as_default():
-            tf.summary.scalar('Score per Episode', self.score, step=self.episode)
+        self.writer.add_summary(tf.Summary(
+            value=[tf.Summary.Value(tag='Score per Episode', simple_value=self.score)]),
+            self.episode
+        )
+        # with self.writer.as_default():
+        #     tf.summary.scalar('Score per Episode', self.score, step=self.episode)
         if self.train and self.episode % 10 == 0:
             self.agent.save_model(self.path)
             try:

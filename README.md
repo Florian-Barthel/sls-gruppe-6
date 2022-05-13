@@ -1,1 +1,1 @@
-# sls-barthefl
+# sls-gruppe-6
