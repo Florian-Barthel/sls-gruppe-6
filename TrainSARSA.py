@@ -3,16 +3,20 @@ from sls import Env, QLRunner
 from sls.agents import *
 
 _CONFIG = dict(
-    episodes=100,
+    episodes=1000,
     screen_size=64,
     minimap_size=16,
     visualize=False,
-    train=False,
+    train=True,
     agent=QLAgent,
+    load_path='./models/...',
+    num_scores_average=50,
     num_states_x=32,
     num_states_y=32,
-    num_scores_average=50,
-    load_path='./results/220515_1821_train_QLAgent/1000.pkl'
+    discount_factor=0.9, # best 0.9
+    learning_rate=0.3, # best 0.3
+    sarsa=True,
+    exploration='boltzmann' # boltzmann or epsilon_greedy
 )
 
 
@@ -20,8 +24,12 @@ def main(unused_argv):
     agent = _CONFIG['agent'](
         train=_CONFIG['train'],
         screen_size=_CONFIG['screen_size'],
+        learning_rate=_CONFIG['learning_rate'],
         num_states_x=_CONFIG['num_states_x'],
-        num_states_y=_CONFIG['num_states_y']
+        num_states_y=_CONFIG['num_states_y'],
+        discount_factor=_CONFIG['discount_factor'],
+        exploration=_CONFIG['exploration'],
+        sarsa=_CONFIG['sarsa']
     )
 
     env = Env(
@@ -36,6 +44,8 @@ def main(unused_argv):
         train=_CONFIG['train'],
         load_path=_CONFIG['load_path'],
         num_scores_average=_CONFIG['num_scores_average'],
+        sarsa=_CONFIG['sarsa'],
+        exploration=_CONFIG['exploration']
     )
 
     runner.run(episodes=_CONFIG['episodes'])

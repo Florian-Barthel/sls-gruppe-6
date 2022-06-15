@@ -12,7 +12,7 @@ _CONFIG = dict(
     num_states_x=32,
     num_states_y=32,
     num_scores_average=50,
-    load_path='./results/220515_1821_train_QLAgent/1000.pkl'
+    load_path='./results/220603_1357_train_QLAgent_boltzmann_SARSA/1000.pkl',
 )
 
 
@@ -35,7 +35,7 @@ def main(unused_argv):
         env=env,
         train=_CONFIG['train'],
         load_path=_CONFIG['load_path'],
-        num_scores_average=_CONFIG['num_scores_average'],
+        num_scores_average=_CONFIG['num_scores_average']
     )
 
     runner.run(episodes=_CONFIG['episodes'])
