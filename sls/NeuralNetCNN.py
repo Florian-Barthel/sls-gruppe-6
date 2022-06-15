@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import tensorflow.keras.backend as K
 
 print('TENSORFLOW', tf.version.VERSION)
 
@@ -8,14 +9,19 @@ print('TENSORFLOW', tf.version.VERSION)
 class Network:
     def __init__(self):
         init = keras.initializers.he_uniform()
-        inputs = keras.Input(shape=(2,), name="input")
-        x1 = layers.Dense(16, activation="relu", kernel_initializer=init)(inputs)
-        x2 = layers.Dense(32, activation="relu", kernel_initializer=init)(x1)
-        outputs = layers.Dense(8, name="predictions", kernel_initializer=init)(x2)
-        self.model_train = keras.Model(inputs=inputs, outputs=outputs)
+        inputs = keras.Input(shape=(16, 16, 27), name="input")
+        conv1 = layers.Conv2D(16, 5, strides=(1, 1), activation="relu", kernel_initializer=init)(inputs)
+        conv2 = layers.Conv2D(32, 3, strides=(1, 1), activation="relu", kernel_initializer=init)(conv1)
+        flatten = layers.Flatten()(conv2)
+        dense1 = layers.Dense(64, activation="relu", kernel_initializer=init)(flatten)
+        output = layers.Dense(9, kernel_initializer=init)(dense1)
+        merge_value_action = layers.Lambda(
+            lambda r: r[:, 0:1] + r[:, 1:] - K.mean(r[:, 1:], axis=-1, keepdims=True),
+            output_shape=(8,)
+        )(output)
+        self.model_train = keras.Model(inputs=inputs, outputs=merge_value_action)
 
-        # self.optimizer = keras.optimizers.RMSprop(lr=0.001)
-        self.optimizer = keras.optimizers.Adam(learning_rate=0.001) # best 0.001
+        self.optimizer = keras.optimizers.Adam(learning_rate=0.001)
         self.model_train.compile(loss=self.mse_clip, optimizer=self.optimizer)
 
         self.model_target = keras.models.clone_model(self.model_train)

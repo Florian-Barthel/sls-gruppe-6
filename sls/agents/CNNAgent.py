@@ -1,10 +1,10 @@
 from sls.agents import AbstractAgent
 from sls.ExperienceReplay import ExperienceReplay, Transition
-from sls.NeuralNet import Network
+from sls.NeuralNetCNN import Network
 import numpy as np
 
 
-class DQNAgent(AbstractAgent):
+class CNNAgent(AbstractAgent):
     def __init__(
             self,
             train: bool,
@@ -15,7 +15,7 @@ class DQNAgent(AbstractAgent):
             batch_size=32, # best 32
             train_interval=1
     ):
-        super(DQNAgent, self).__init__(screen_size)
+        super(CNNAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
 
         assert exploration in ['epsilon_greedy', 'boltzmann']
@@ -50,15 +50,12 @@ class DQNAgent(AbstractAgent):
         if self._MOVE_SCREEN.id not in obs.observation.available_actions:
             return self._SELECT_ARMY
         marine = self._get_marine(obs)
-        beacon = self._get_beacon(obs)
         if marine is None:
             return self._NO_OP
         marine_coords = self._get_unit_pos(marine)
-        beacon_coords = self._get_unit_pos(beacon)
         reward = obs.reward
         is_terminal = reward > 0
-        diff = beacon_coords - marine_coords
-        current_state = np.array(diff / self.screen_size)
+        current_state = np.transpose(obs[3].feature_screen, [1, 2, 0])
         assert -1 <= current_state.all() <= 1
 
         # only predict if necessary
@@ -92,20 +89,24 @@ class DQNAgent(AbstractAgent):
                 actions = np.array(actions)
                 next_states = np.array(next_states)
 
-                y = self.net.predict_train_model(x)
+                y_train = self.net.predict_train_model(x)
+                y_target = self.net.predict_target_model(x)
+                next_rows_train = self.net.predict_train_model(next_states)
                 next_rows_target = self.net.predict_target_model(next_states)
 
                 for i, transition in enumerate(transition_batch):
                     if transition.done:
-                        y[i, actions[i]] = transition.next_reward
+                        y_train[i, actions[i]] = transition.next_reward
+                        y_target[i, actions[i]] = transition.next_reward
                     else:
-                        y[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
+                        y_train[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
+                        y_target[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_train[i])
 
-                self.loss = self.net.train_step_train_model(x=x, y=y)
+                self.loss = self.net.train_step_train_model(x=x, y=y_train)
+                self.loss += self.net.train_step_target_model(x=x, y=y_target)
 
         self.prev_state = current_state
         self.prev_action = current_action
-        self.prev_marine_coords = marine_coords
         if is_terminal or obs.last():
             self.prev_state = None
         return self._dir_to_sc2_action(self.actions[current_action], marine_coords)
@@ -117,4 +118,4 @@ class DQNAgent(AbstractAgent):
         self.net.load_model(filename)
 
     def update_target_model(self):
-        self.net.update_target_model()
+        pass

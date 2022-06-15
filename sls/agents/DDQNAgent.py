@@ -4,7 +4,7 @@ from sls.NeuralNet import Network
 import numpy as np
 
 
-class DQNAgent(AbstractAgent):
+class DDQNAgent(AbstractAgent):
     def __init__(
             self,
             train: bool,
@@ -15,7 +15,7 @@ class DQNAgent(AbstractAgent):
             batch_size=32, # best 32
             train_interval=1
     ):
-        super(DQNAgent, self).__init__(screen_size)
+        super(DDQNAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
 
         assert exploration in ['epsilon_greedy', 'boltzmann']
@@ -92,16 +92,21 @@ class DQNAgent(AbstractAgent):
                 actions = np.array(actions)
                 next_states = np.array(next_states)
 
-                y = self.net.predict_train_model(x)
+                y_train = self.net.predict_train_model(x)
+                y_target = self.net.predict_target_model(x)
+                next_rows_train = self.net.predict_train_model(next_states)
                 next_rows_target = self.net.predict_target_model(next_states)
 
                 for i, transition in enumerate(transition_batch):
                     if transition.done:
-                        y[i, actions[i]] = transition.next_reward
+                        y_train[i, actions[i]] = transition.next_reward
+                        y_target[i, actions[i]] = transition.next_reward
                     else:
-                        y[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
+                        y_train[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
+                        y_target[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_train[i])
 
-                self.loss = self.net.train_step_train_model(x=x, y=y)
+                self.loss = self.net.train_step_train_model(x=x, y=y_train)
+                self.loss += self.net.train_step_target_model(x=x, y=y_target)
 
         self.prev_state = current_state
         self.prev_action = current_action
@@ -117,4 +122,4 @@ class DQNAgent(AbstractAgent):
         self.net.load_model(filename)
 
     def update_target_model(self):
-        self.net.update_target_model()
+        pass

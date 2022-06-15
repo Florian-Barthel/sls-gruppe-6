@@ -1,10 +1,10 @@
 from sls.agents import AbstractAgent
 from sls.ExperienceReplay import ExperienceReplay, Transition
-from sls.NeuralNet import Network
+from sls.NeuralNetDueling import Network
 import numpy as np
 
 
-class DQNAgent(AbstractAgent):
+class DuelingDQNAgent(AbstractAgent):
     def __init__(
             self,
             train: bool,
@@ -15,7 +15,7 @@ class DQNAgent(AbstractAgent):
             batch_size=32, # best 32
             train_interval=1
     ):
-        super(DQNAgent, self).__init__(screen_size)
+        super(DuelingDQNAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
 
         assert exploration in ['epsilon_greedy', 'boltzmann']

@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import tensorflow.keras.backend as K
 
 print('TENSORFLOW', tf.version.VERSION)
 
@@ -11,8 +12,9 @@ class Network:
         inputs = keras.Input(shape=(2,), name="input")
         x1 = layers.Dense(16, activation="relu", kernel_initializer=init)(inputs)
         x2 = layers.Dense(32, activation="relu", kernel_initializer=init)(x1)
-        outputs = layers.Dense(8, name="predictions", kernel_initializer=init)(x2)
-        self.model_train = keras.Model(inputs=inputs, outputs=outputs)
+        x3 = layers.Dense(9, kernel_initializer=init)(x2)
+        merge_va = layers.Lambda(lambda r: r[:, 0:1] + r[:, 1:] - K.mean(r[:, 1:], axis=-1, keepdims=True), output_shape=(8,))(x3)
+        self.model_train = keras.Model(inputs=inputs, outputs=merge_va)
 
         # self.optimizer = keras.optimizers.RMSprop(lr=0.001)
         self.optimizer = keras.optimizers.Adam(learning_rate=0.001) # best 0.001
@@ -20,7 +22,6 @@ class Network:
 
         self.model_target = keras.models.clone_model(self.model_train)
         self.model_target.compile(loss=self.mse_clip, optimizer=self.optimizer)
-
 
     def train_step_train_model(self, x, y):
         return self.model_train.train_on_batch(x, y)
