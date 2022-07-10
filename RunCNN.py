@@ -3,19 +3,19 @@ from sls import Env, QLRunner
 from sls.agents import *
 
 _CONFIG = dict(
-    episodes=1000,
+    episodes=50,
     screen_size=16,
     minimap_size=16,
     visualize=False,
-    train=True,
+    train=False,
     agent=CNNAgent,
-    load_path='./models/...',
     num_scores_average=50,
     discount_factor=0.9, # best 0.9
     sarsa=False,
     exploration='epsilon_greedy',
     file_format='.h5',
-    priority_buffer=True
+    priority_buffer=True,
+    load_path='./results/220625_1923_train_CNNAgent_epsilon_greedy/590.h5'
 )
 
 

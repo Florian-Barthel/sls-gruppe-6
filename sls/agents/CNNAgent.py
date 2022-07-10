@@ -1,7 +1,7 @@
 from sls.agents import AbstractAgent
-from sls.ExperienceReplay import ExperienceReplay, Transition
 from sls.NeuralNetCNN import Network
 import numpy as np
+from baselines.deepq import PrioritizedReplayBuffer
 
 
 class CNNAgent(AbstractAgent):
@@ -13,8 +13,12 @@ class CNNAgent(AbstractAgent):
             exploration='epsilon_greedy',
             min_replay_size=6000,
             batch_size=32, # best 32
-            train_interval=1
+            epsilon_replay=1e-6,
+            beta=0.6,
+            beta_inc=5e-6
     ):
+        self.epsilon_replay = epsilon_replay
+        self.replay_buffer = PrioritizedReplayBuffer(size=100000, alpha=0.4)
         super(CNNAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
 
@@ -25,14 +29,14 @@ class CNNAgent(AbstractAgent):
         self.screen_size = screen_size
         self.min_replay_size = min_replay_size
         self.batch_size = batch_size
-
         self.prev_action = None
         self.prev_state = None
         self.prev_marine_coords = None
         self.loss = 0
-
-        self.experience_replay = ExperienceReplay(100000)
+        self.beta = beta
+        self.beta_inc = beta_inc
         self.net = Network()
+        self.replay_length = 0
 
         # epsilon decay
         if train:
@@ -42,9 +46,6 @@ class CNNAgent(AbstractAgent):
 
         # boltzmann
         self.temperature = 500
-        self.index = 0
-        self.replay_length = 0
-        self.train_interval = train_interval
 
     def step(self, obs):
         if self._MOVE_SCREEN.id not in obs.observation.available_actions:
@@ -55,55 +56,41 @@ class CNNAgent(AbstractAgent):
         marine_coords = self._get_unit_pos(marine)
         reward = obs.reward
         is_terminal = reward > 0
-        current_state = np.transpose(obs[3].feature_screen, [1, 2, 0])
-        assert -1 <= current_state.all() <= 1
-
-        # only predict if necessary
+        current_state = np.expand_dims(np.array(obs[3].feature_screen['unit_density']), axis=-1).astype(np.float32)
         if np.random.uniform() < self.epsilon:
             current_action = np.random.choice(range(len(self.actions)))
         else:
             current_action = np.argmax(self.net.predict_train_model(np.expand_dims(current_state, axis=0))[0])
 
-        self.index += 1
         if self.train and self.prev_state is not None:
-            current_transition = Transition(
-                current_state=self.prev_state,
-                current_action=self.prev_action,
-                next_reward=reward,
-                next_state=current_state,
+            self.replay_buffer.add(
+                obs_t=self.prev_state,
+                action=self.prev_action,
+                reward=reward,
+                obs_tp1=current_state,
                 done=is_terminal
             )
-            self.experience_replay.append(current_transition)
-            self.replay_length = len(self.experience_replay)
-            if self.replay_length > self.min_replay_size and self.index % self.train_interval == 0:
-                transition_batch = self.experience_replay.get_random_batch(self.batch_size)
-                x = []
-                actions = []
-                next_states = []
-                for transition in transition_batch:
-                    x.append(transition.current_state)
-                    actions.append(transition.current_action)
-                    next_states.append(transition.next_state)
+            self.replay_length = len(self.replay_buffer)
+            if self.replay_length > self.min_replay_size:
+                obs_batch, act_batch, rew_batch, next_obs_batch, done_mask, weights, indices = self.replay_buffer.sample(self.batch_size, beta=self.beta)
+                self.beta = min(self.beta_inc + self.beta, 1.0)
 
-                x = np.array(x)
-                actions = np.array(actions)
-                next_states = np.array(next_states)
+                y = self.net.predict_train_model(obs_batch)
+                train_model_prediction = y.copy()
+                next_rows_train = self.net.predict_train_model(next_obs_batch)
+                next_rows_target = self.net.predict_target_model(next_obs_batch)
 
-                y_train = self.net.predict_train_model(x)
-                y_target = self.net.predict_target_model(x)
-                next_rows_train = self.net.predict_train_model(next_states)
-                next_rows_target = self.net.predict_target_model(next_states)
-
-                for i, transition in enumerate(transition_batch):
-                    if transition.done:
-                        y_train[i, actions[i]] = transition.next_reward
-                        y_target[i, actions[i]] = transition.next_reward
+                for i in range(np.shape(obs_batch)[0]):
+                    if done_mask[i]:
+                        y[i, act_batch[i]] = rew_batch[i]
                     else:
-                        y_train[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
-                        y_target[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_train[i])
+                        max_index_train = np.argmax(next_rows_train[i])
+                        y[i, act_batch[i]] = rew_batch[i] + self.discount_factor * next_rows_target[i][max_index_train]
 
-                self.loss = self.net.train_step_train_model(x=x, y=y_train)
-                self.loss += self.net.train_step_target_model(x=x, y=y_target)
+                separated_loss = self.net.mse_numpy(x=train_model_prediction, y=y)
+                priority = separated_loss + self.epsilon_replay
+                self.loss = self.net.train_step_train_model(x=obs_batch, y=y)
+                self.replay_buffer.update_priorities(indices, priority)
 
         self.prev_state = current_state
         self.prev_action = current_action
@@ -118,4 +105,4 @@ class CNNAgent(AbstractAgent):
         self.net.load_model(filename)
 
     def update_target_model(self):
-        pass
+        self.net.update_target_model()

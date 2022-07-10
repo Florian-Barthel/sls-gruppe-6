@@ -7,15 +7,14 @@ _CONFIG = dict(
     screen_size=16,
     minimap_size=16,
     visualize=False,
-    train=True,
-    agent=CNNAgent,
-    load_path='./models/...',
+    train=False,
+    agent=DuelingDQNAgent,
+    load_path='./results/220615_1321_train_DuelingDQNAgent_epsilon_greedy/800.h5',
     num_scores_average=50,
-    discount_factor=0.9, # best 0.9
+    discount_factor=0.8, # best 0.8
     sarsa=False,
     exploration='epsilon_greedy',
-    file_format='.h5',
-    priority_buffer=True
+    file_format='.h5'
 )
 
 
@@ -41,8 +40,7 @@ def main(unused_argv):
         num_scores_average=_CONFIG['num_scores_average'],
         sarsa=_CONFIG['sarsa'],
         exploration=_CONFIG['exploration'],
-        file_format=_CONFIG['file_format'],
-        priority_buffer=_CONFIG['priority_buffer']
+        file_format=_CONFIG['file_format']
     )
 
     runner.run(episodes=_CONFIG['episodes'])

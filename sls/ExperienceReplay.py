@@ -18,7 +18,6 @@ class Transition:
         self.next_state = next_state
         self.done = done
 
-
 class ExperienceReplay:
     def __init__(
             self,

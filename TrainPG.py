@@ -1,30 +1,32 @@
 from absl import app
-from sls import Env, QLRunner
+from sls import Env, PGRunner
 from sls.agents import *
+from sls.NeuralNetPG import Network
+
 
 _CONFIG = dict(
     episodes=1000,
-    screen_size=16,
+    screen_size=64,
     minimap_size=16,
     visualize=False,
     train=True,
-    agent=CNNAgent,
+    agent=PGAgent,
     load_path='./models/...',
     num_scores_average=50,
-    discount_factor=0.9, # best 0.9
+    gamma=0.99,
     sarsa=False,
     exploration='epsilon_greedy',
-    file_format='.h5',
-    priority_buffer=True
+    file_format='.h5'
 )
 
+network = Network()
 
 def main(unused_argv):
     agent = _CONFIG['agent'](
         train=_CONFIG['train'],
         screen_size=_CONFIG['screen_size'],
-        discount_factor=_CONFIG['discount_factor'],
-        exploration=_CONFIG['exploration']
+        exploration=_CONFIG['exploration'],
+        network=network
     )
 
     env = Env(
@@ -33,7 +35,7 @@ def main(unused_argv):
         visualize=_CONFIG['visualize']
     )
 
-    runner = QLRunner(
+    runner = PGRunner(
         agent=agent,
         env=env,
         train=_CONFIG['train'],
@@ -42,7 +44,8 @@ def main(unused_argv):
         sarsa=_CONFIG['sarsa'],
         exploration=_CONFIG['exploration'],
         file_format=_CONFIG['file_format'],
-        priority_buffer=_CONFIG['priority_buffer']
+        network=network,
+        gamma=_CONFIG['gamma']
     )
 
     runner.run(episodes=_CONFIG['episodes'])

@@ -92,21 +92,17 @@ class DDQNAgent(AbstractAgent):
                 actions = np.array(actions)
                 next_states = np.array(next_states)
 
-                y_train = self.net.predict_train_model(x)
-                y_target = self.net.predict_target_model(x)
+                y = self.net.predict_train_model(x)
                 next_rows_train = self.net.predict_train_model(next_states)
                 next_rows_target = self.net.predict_target_model(next_states)
 
                 for i, transition in enumerate(transition_batch):
                     if transition.done:
-                        y_train[i, actions[i]] = transition.next_reward
-                        y_target[i, actions[i]] = transition.next_reward
+                        y[i, actions[i]] = transition.next_reward
                     else:
-                        y_train[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_target[i])
-                        y_target[i, actions[i]] = transition.next_reward + self.discount_factor * np.max(next_rows_train[i])
+                        y[i, actions[i]] = transition.next_reward + self.discount_factor * next_rows_target[i][np.argmax(next_rows_train[i])]
 
-                self.loss = self.net.train_step_train_model(x=x, y=y_train)
-                self.loss += self.net.train_step_target_model(x=x, y=y_target)
+                self.loss = self.net.train_step_train_model(x=x, y=y)
 
         self.prev_state = current_state
         self.prev_action = current_action
@@ -122,4 +118,4 @@ class DDQNAgent(AbstractAgent):
         self.net.load_model(filename)
 
     def update_target_model(self):
-        pass
+        self.net.update_target_model()

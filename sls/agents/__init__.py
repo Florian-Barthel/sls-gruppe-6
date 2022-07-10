@@ -6,3 +6,4 @@ from .DQNAgent import DQNAgent
 from .DDQNAgent import DDQNAgent
 from .DuelingDQNAgent import DuelingDQNAgent
 from .CNNAgent import CNNAgent
+from .PGAgent import PGAgent

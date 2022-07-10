@@ -1,21 +1,25 @@
 import datetime
 import numpy as np
 import tensorflow as tf
+
 from sls.env import Env
+from sls.EpisodeReplay import EpisodeReplay
+from sls.NeuralNetPG import Network
 
-
-class QLRunner:
+class PGRunner:
     def __init__(
-            self,
-            agent,
-            env: Env,
-            train: bool,
-            load_path: str,
-            num_scores_average: int,
-            sarsa: bool = False,
-            exploration: str = 'epsilon_greedy',
-            file_format: str = '.pkl',
-            priority_buffer: bool = False
+        self,
+        agent,
+        env: Env,
+        train: bool,
+        load_path: str,
+        num_scores_average: int,
+        gamma: float,
+        network: Network,
+        sarsa: bool = False,
+        exploration: str = 'epsilon_greedy',
+        file_format: str = '.pkl',
+        priority_buffer: bool = False,
     ):
 
         self.agent = agent
@@ -34,6 +38,8 @@ class QLRunner:
         self.file_format = file_format
         self.beta = 0
         self.priority_buffer = priority_buffer
+        self.gamma = gamma
+        self.network = network
 
         config_description = type(agent).__name__ + '_' + exploration
         if sarsa:
@@ -52,23 +58,7 @@ class QLRunner:
             self.episode
         )
         self.writer.add_summary(tf.Summary(
-            value=[tf.Summary.Value(tag='Epsilon', simple_value=self.agent.epsilon)]),
-            self.episode
-        )
-        self.writer.add_summary(tf.Summary(
-            value=[tf.Summary.Value(tag='Temperature', simple_value=self.agent.temperature)]),
-            self.episode
-        )
-        self.writer.add_summary(tf.Summary(
             value=[tf.Summary.Value(tag='Loss', simple_value=self.loss_average)]),
-            self.episode
-        )
-        self.writer.add_summary(tf.Summary(
-            value=[tf.Summary.Value(tag='Beta', simple_value=self.get_beta())]),
-            self.episode
-        )
-        self.writer.add_summary(tf.Summary(
-            value=[tf.Summary.Value(tag='Replay Length', simple_value=self.get_replay_length())]),
             self.episode
         )
         if self.train and self.episode % 10 == 0:
@@ -83,43 +73,29 @@ class QLRunner:
         self.total_episodes = episodes
         while self.episode <= episodes:
             obs = self.env.reset()
+            episode_replay = EpisodeReplay()
             while True:
-                action = self.agent.step(obs)
+                action, episode_transition = self.agent.step(obs)
+                if episode_transition is not None:
+                    episode_replay.append(episode_transition)
+                    # if episode_transition.next_reward > 0:
+                    #     break
                 if obs.last():
                     break
                 obs = self.env.step(action)
                 self.score += obs.reward
-                self.update_loss()
+            states = episode_replay.get_states()
+            g = episode_replay.calculate_g(gamma=self.gamma)
+            loss = self.network.train_step_train_model(x=states, y=g)
+            self.update_loss(loss)
             self.add_score()
             self.summarize()
-            if self.train and self.exploration == 'epsilon_greedy':
-                self.update_epsilon()
-            elif self.train and self.exploration == 'boltzmann':
-                self.update_temperature()
 
     def add_score(self):
         self.score_average_list.append(self.score)
         self.score_average = np.mean(np.array(self.score_average_list)[-min(len(self.score_average_list), 50):])
         self.score = 0
 
-    def update_loss(self):
-        if hasattr(self.agent, 'loss'):
-            self.loss_average_list.append(self.agent.loss)
-            self.loss_average = np.mean(np.array(self.loss_average_list)[-min(len(self.loss_average_list), 100):])
-
-    def update_epsilon(self):
-        w = max(1 - self.episode / 500, 0)
-        self.agent.epsilon = 1 * w + 0.05 * (1 - w)
-
-    def update_temperature(self):
-        self.agent.temperature = max(self.agent.temperature * 0.98, 0.01)
-
-    def get_replay_length(self):
-        if hasattr(self.agent, 'replay_length'):
-            self.replay_length = self.agent.replay_length
-        return self.replay_length
-
-    def get_beta(self):
-        if hasattr(self.agent, 'beta'):
-            self.beta = self.agent.beta
-        return self.beta
+    def update_loss(self, loss):
+        self.loss_average_list.append(loss)
+        self.loss_average = np.mean(np.array(self.loss_average_list)[-min(len(self.loss_average_list), 100):])

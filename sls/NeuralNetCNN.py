@@ -2,14 +2,16 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 import tensorflow.keras.backend as K
+import numpy as np
 
 print('TENSORFLOW', tf.version.VERSION)
+print(tf.config.experimental_list_devices())
 
 
 class Network:
     def __init__(self):
         init = keras.initializers.he_uniform()
-        inputs = keras.Input(shape=(16, 16, 27), name="input")
+        inputs = keras.Input(shape=(16, 16, 1), name="input")
         conv1 = layers.Conv2D(16, 5, strides=(1, 1), activation="relu", kernel_initializer=init)(inputs)
         conv2 = layers.Conv2D(32, 3, strides=(1, 1), activation="relu", kernel_initializer=init)(conv1)
         flatten = layers.Flatten()(conv2)
@@ -21,18 +23,14 @@ class Network:
         )(output)
         self.model_train = keras.Model(inputs=inputs, outputs=merge_value_action)
 
-        self.optimizer = keras.optimizers.Adam(learning_rate=0.001)
-        self.model_train.compile(loss=self.mse_clip, optimizer=self.optimizer)
+        self.optimizer = keras.optimizers.Adam(learning_rate=0.0005) # best
+        # self.optimizer = keras.optimizers.RMSprop(learning_rate=0.0025)
+        self.model_train.compile(loss=self.mse, optimizer=self.optimizer) #mse clip
 
         self.model_target = keras.models.clone_model(self.model_train)
-        self.model_target.compile(loss=self.mse_clip, optimizer=self.optimizer)
-
 
     def train_step_train_model(self, x, y):
         return self.model_train.train_on_batch(x, y)
-
-    def train_step_target_model(self, x, y):
-        return self.model_target.train_on_batch(x, y)
 
     def predict_target_model(self, x):
         return self.model_target.predict_on_batch(x)
@@ -54,3 +52,14 @@ class Network:
     def mse_clip(x, y):
         return keras.backend.mean(keras.backend.square(keras.backend.clip(x - y, -1, 1)), axis=-1)
 
+    @staticmethod
+    def mse_clip_numpy(x, y):
+        return np.mean(np.square(np.clip(x - y, -1, 1)), axis=-1)
+
+    @staticmethod
+    def mse(x, y):
+        return keras.backend.mean(keras.backend.square(x - y), axis=-1)
+
+    @staticmethod
+    def mse_numpy(x, y):
+        return np.mean(np.square(x - y), axis=-1)
