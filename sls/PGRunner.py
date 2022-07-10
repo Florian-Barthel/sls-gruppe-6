@@ -6,6 +6,7 @@ from sls.env import Env
 from sls.EpisodeReplay import EpisodeReplay
 from sls.NeuralNetPG import Network
 
+
 class PGRunner:
     def __init__(
         self,
@@ -16,10 +17,7 @@ class PGRunner:
         num_scores_average: int,
         gamma: float,
         network: Network,
-        sarsa: bool = False,
-        exploration: str = 'epsilon_greedy',
-        file_format: str = '.pkl',
-        priority_buffer: bool = False,
+        file_format: str = '.pkl'
     ):
 
         self.agent = agent
@@ -33,17 +31,11 @@ class PGRunner:
         self.score_average = 0
         self.loss_average = 0
         self.total_episodes = 0
-        self.replay_length = 0
-        self.exploration = exploration
         self.file_format = file_format
-        self.beta = 0
-        self.priority_buffer = priority_buffer
         self.gamma = gamma
         self.network = network
 
-        config_description = type(agent).__name__ + '_' + exploration
-        if sarsa:
-            config_description += '_SARSA'
+        config_description = type(agent).__name__
 
         self.path = './results/' + datetime.datetime.now().strftime("%y%m%d_%H%M") \
                     + ('_train_' if self.train else 'run_') \
@@ -85,15 +77,17 @@ class PGRunner:
                 obs = self.env.step(action)
                 self.score += obs.reward
             states = episode_replay.get_states()
-            g = episode_replay.calculate_g(gamma=self.gamma)
-            loss = self.network.train_step_train_model(x=states, y=g)
+            actions = np.array(episode_replay.get_actions())
+            g = np.array(episode_replay.calculate_g(gamma=self.gamma))
+            g_actions = np.stack([g, actions], axis=-1)
+            loss = self.network.train_step_train_model(x=states, y=g_actions)
             self.update_loss(loss)
             self.add_score()
             self.summarize()
 
     def add_score(self):
         self.score_average_list.append(self.score)
-        self.score_average = np.mean(np.array(self.score_average_list)[-min(len(self.score_average_list), 50):])
+        self.score_average = np.mean(np.array(self.score_average_list)[-min(len(self.score_average_list), self.num_scores_average):])
         self.score = 0
 
     def update_loss(self, loss):

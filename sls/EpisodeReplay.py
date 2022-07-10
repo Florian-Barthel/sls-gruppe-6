@@ -37,3 +37,9 @@ class EpisodeReplay:
         for t in range(len(self.replay)):
             states.append(self.replay[t].current_state)
         return np.array(states)
+
+    def get_actions(self):
+        actions = []
+        for t in range(len(self.replay)):
+            actions.append(self.replay[t].current_action)
+        return np.array(actions)

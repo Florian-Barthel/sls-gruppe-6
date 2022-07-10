@@ -8,14 +8,10 @@ class PGAgent(AbstractAgent):
             self,
             train: bool,
             screen_size: int,
-            network,
-            exploration='epsilon_greedy',
+            network
     ):
         super(PGAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
-
-        assert exploration in ['epsilon_greedy', 'boltzmann']
-        self.exploration = exploration
         self.train = train
         self.screen_size = screen_size
         self.net = network
@@ -38,7 +34,9 @@ class PGAgent(AbstractAgent):
         current_state = np.array(diff / self.screen_size)
         assert -1 <= current_state.all() <= 1
 
-        current_action = np.argmax(self.net.predict(np.expand_dims(current_state, axis=0))[0])
+        prob = self.net.predict(np.expand_dims(current_state, axis=0))[0]
+        actions = np.arange(0, 8, 1)
+        current_action = np.random.choice(a=actions, p=prob)
 
         if reward > 0:
             reward = 100

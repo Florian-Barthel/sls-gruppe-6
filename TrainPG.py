@@ -6,7 +6,7 @@ from sls.NeuralNetPG import Network
 
 _CONFIG = dict(
     episodes=1000,
-    screen_size=64,
+    screen_size=16,
     minimap_size=16,
     visualize=False,
     train=True,
@@ -14,8 +14,6 @@ _CONFIG = dict(
     load_path='./models/...',
     num_scores_average=50,
     gamma=0.99,
-    sarsa=False,
-    exploration='epsilon_greedy',
     file_format='.h5'
 )
 
@@ -25,7 +23,6 @@ def main(unused_argv):
     agent = _CONFIG['agent'](
         train=_CONFIG['train'],
         screen_size=_CONFIG['screen_size'],
-        exploration=_CONFIG['exploration'],
         network=network
     )
 
@@ -41,8 +38,6 @@ def main(unused_argv):
         train=_CONFIG['train'],
         load_path=_CONFIG['load_path'],
         num_scores_average=_CONFIG['num_scores_average'],
-        sarsa=_CONFIG['sarsa'],
-        exploration=_CONFIG['exploration'],
         file_format=_CONFIG['file_format'],
         network=network,
         gamma=_CONFIG['gamma']
