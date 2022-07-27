@@ -1,7 +1,8 @@
 from absl import app
 from sls import Env, PGRunner
 from sls.agents import *
-from sls.NeuralNetPG import Network
+from sls.NeuralNetA2C import Network
+from sls.RunnerA2C import RunnerA2C
 
 
 _CONFIG = dict(
@@ -17,7 +18,8 @@ _CONFIG = dict(
     file_format='.h5'
 )
 
-network = Network()
+network = None #Network()
+
 
 def main(unused_argv):
     agent = _CONFIG['agent'](
@@ -26,8 +28,15 @@ def main(unused_argv):
         network=network
     )
 
-    runner = PGRunner(
+    env = Env(
+        screen_size=_CONFIG['screen_size'],
+        minimap_size=_CONFIG['minimap_size'],
+        visualize=_CONFIG['visualize']
+    )
+
+    runner = RunnerA2C(
         agent=agent,
+        env=env,
         train=_CONFIG['train'],
         load_path=_CONFIG['load_path'],
         num_scores_average=_CONFIG['num_scores_average'],

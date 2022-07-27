@@ -5,13 +5,13 @@ from sls.NeuralNetPG import Network
 
 
 _CONFIG = dict(
-    episodes=10000,
+    episodes=200,
     screen_size=16,
     minimap_size=16,
     visualize=False,
-    train=True,
+    train=False,
     agent=PGAgent,
-    load_path='./models/...',
+    load_path='./results/220710_2015_train_PGAgent/6000.h5',
     num_scores_average=50,
     gamma=0.99,
     file_format='.h5'
@@ -26,8 +26,15 @@ def main(unused_argv):
         network=network
     )
 
+    env = Env(
+        screen_size=_CONFIG['screen_size'],
+        minimap_size=_CONFIG['minimap_size'],
+        visualize=_CONFIG['visualize']
+    )
+
     runner = PGRunner(
         agent=agent,
+        env=env,
         train=_CONFIG['train'],
         load_path=_CONFIG['load_path'],
         num_scores_average=_CONFIG['num_scores_average'],

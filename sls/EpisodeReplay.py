@@ -20,16 +20,21 @@ class EpisodeReplay:
     def __len__(self):
         return len(self.replay)
 
+    def reset(self):
+        self.replay = []
+
     def append(self, transition: PGTransition):
         self.replay.append(transition)
 
     def calculate_g(self, gamma: float):
         g = []
         for t in range(len(self.replay)):
+            label = np.zeros(8)
             current_g = 0
             for k in range(t + 1, len(self.replay)):
-                current_g += gamma**(k - t - 1) * self.replay[k].next_reward
-            g.append(current_g)
+                current_g += gamma**(k - t - 1) * self.replay[k].next_reward # k - 1?
+            label[self.replay[t].current_action] = current_g
+            g.append(label)
         return g
 
     def get_states(self):

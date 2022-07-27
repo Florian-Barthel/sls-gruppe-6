@@ -7,3 +7,4 @@ from .DDQNAgent import DDQNAgent
 from .DuelingDQNAgent import DuelingDQNAgent
 from .CNNAgent import CNNAgent
 from .PGAgent import PGAgent
+from .A2CAgent import A2CAgent

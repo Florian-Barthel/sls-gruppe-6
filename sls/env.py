@@ -24,3 +24,6 @@ class Env:
     def preprocess_obs(self, timsteps):
         # Any kind of preprocessing can take place here
         return timsteps[0]
+
+    def close(self):
+        self.sc2_env.close()
