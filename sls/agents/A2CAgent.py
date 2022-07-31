@@ -30,7 +30,6 @@ class A2CAgent(AbstractAgent):
         self.network = Network()
         self.episode_replays = [EpisodeReplayA2C(n_step_return, gamma=gamma) for _ in range(num_worker)]
         self.num_worker = num_worker
-        self.n_step_return = n_step_return
         self.prev_obs_list = []
         self.counter = 0
         self.new_episode = [True for _ in range(num_worker)]

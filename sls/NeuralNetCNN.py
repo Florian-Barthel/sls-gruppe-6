@@ -11,7 +11,7 @@ print(tf.config.experimental_list_devices())
 class Network:
     def __init__(self):
         init = keras.initializers.he_uniform()
-        inputs = keras.Input(shape=(16, 16, 1), name="input")
+        inputs = keras.Input(shape=(1, 16, 16), name="input")
         conv1 = layers.Conv2D(16, 5, strides=(1, 1), activation="relu", kernel_initializer=init)(inputs)
         conv2 = layers.Conv2D(32, 3, strides=(1, 1), activation="relu", kernel_initializer=init)(conv1)
         flatten = layers.Flatten()(conv2)

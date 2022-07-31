@@ -14,13 +14,9 @@ class Network:
             c_val=0.5,
             c_h=0.005,
             lr=0.0007,
-            n_step=5,
-            gamma=0.99
     ):
         self.c_val = c_val
         self.c_h = c_h
-        self.n_step = n_step
-        self.gamma = gamma
 
         init = keras.initializers.he_uniform()
         inputs = keras.Input(shape=(16, 16, 1), name="input")
