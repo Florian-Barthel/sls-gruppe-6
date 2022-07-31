@@ -32,25 +32,22 @@ class Network:
         output_value = layers.Dense(1, kernel_initializer=init)(dense1)
         self.model = keras.Model(inputs=[inputs], outputs=[output_policy, output_value])
 
-        value_target = keras.backend.placeholder(shape=[1])
-        advantage = keras.backend.placeholder(shape=[1])
-        a2c_loss = self.a2c_loss(x=self.model.output, value_target=value_target, advantage=advantage)
+        value_target = K.placeholder(shape=[None, 8])
+
+        a2c_loss = self.a2c_loss(x=self.model.output, value_target=value_target)
 
         self.optimizer = keras.optimizers.RMSprop(learning_rate=lr)
-        self.model.compile(loss=a2c_loss, optimizer=self.optimizer)
+        # self.model.compile(loss=a2c_loss, optimizer=self.optimizer)
         update = self.optimizer.get_updates(loss=a2c_loss, params=self.model.trainable_weights)
-        self.fit = keras.backend.function(inputs=[self.model.input, value_target, advantage], outputs=[a2c_loss], updates=update)
+        self.fit = K.function(inputs=[self.model.input, value_target], outputs=[a2c_loss], updates=update)
 
-    def train_step(self, x, value_target, advantage):
-        return self.fit([x, value_target, advantage])
-
-    def predict_value(self, x):
-        prediction = self.model.predict_on_batch(x)
-        return prediction[: 1]
+    def predict_both(self, x):
+        output_policy, output_value = self.model.predict_on_batch(x)
+        return np.argmax(output_policy, axis=-1), output_value
 
     def predict_policy(self, x):
         prediction = self.model.predict_on_batch(x)
-        return prediction[: 0]
+        return np.argmax(prediction[: 0], axis=-1)
 
     def save_model(self, filename):
         self.model.save(filename, save_format='h5')
@@ -58,14 +55,14 @@ class Network:
     def load_model(self, filename):
         self.model = keras.models.load_model(filename, compile=False)
 
-    def a2c_loss(self, x, value_target, advantage):
+    def a2c_loss(self, x, value_target):
 
         output_policy, output_value = x
-        # advantage = tf.stop_gradient(advantage_target - K.mean(output_value))
+        advantage = tf.stop_gradient(value_target - output_value)
 
-        policy_loss = -keras.backend.mean(advantage * keras.backend.log(output_policy))
+        policy_loss = -K.mean(advantage * K.log(output_policy))
         value_loss = K.mean(K.square(value_target - output_value))
-        policy_entropy = -K.sum(-K.sum(output_policy * K.log(K.maximum(output_policy, 0.00001)), axis=-1))
+        policy_entropy = -K.mean(-K.sum(output_policy * K.log(K.maximum(output_policy, 0.00001)), axis=-1))
         return policy_loss + self.c_val * value_loss + self.c_h * policy_entropy
 
 

@@ -1,7 +1,10 @@
 from sls.agents import AbstractAgent
-from sls.NeuralNetCNN import Network
+from sls.NeuralNetA2C import Network
+from sls.EpisodeReplayA2C import EpisodeReplayA2C, SAGTriple
+from sls import Env
+
 import numpy as np
-from baselines.deepq import PrioritizedReplayBuffer
+from multiprocessing import Process, Pipe
 
 
 class A2CAgent(AbstractAgent):
@@ -9,96 +12,164 @@ class A2CAgent(AbstractAgent):
             self,
             train: bool,
             screen_size: int,
-            discount_factor: float,
-            exploration='epsilon_greedy',
-            min_replay_size=6000,
-            batch_size=32,
-            epsilon_replay=1e-6,
-            beta=0.6,
-            beta_inc=5e-6
+            minimap_size: int,
+            gamma=0.99,
+            batch_size=8,
+            n_step_return=5,
+            num_worker=8,
     ):
-        self.epsilon_replay = epsilon_replay
-        self.replay_buffer = PrioritizedReplayBuffer(size=100000, alpha=0.4)
         super(A2CAgent, self).__init__(screen_size)
         self.actions = list(self._DIRECTIONS.keys())
-
-        assert exploration in ['epsilon_greedy', 'boltzmann']
-        self.exploration = exploration
-        self.discount_factor = discount_factor
         self.train = train
         self.screen_size = screen_size
-        self.min_replay_size = min_replay_size
+        self.minimap_size = minimap_size
         self.batch_size = batch_size
-        self.prev_action = None
-        self.prev_state = None
-        self.prev_marine_coords = None
+        self.prev_actions = None
+        self.prev_states = None
         self.loss = 0
-        self.beta = beta
-        self.beta_inc = beta_inc
-        self.net = Network()
-        self.replay_length = 0
+        self.network = Network()
+        self.episode_replays = [EpisodeReplayA2C(n_step_return, gamma=gamma) for _ in range(num_worker)]
+        self.num_worker = num_worker
+        self.n_step_return = n_step_return
+        self.prev_obs_list = []
+        self.counter = 0
+        self.new_episode = [True for _ in range(num_worker)]
 
-        # epsilon decay
         if train:
             self.epsilon = 1
         else:
             self.epsilon = 0
 
+        self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(self.num_worker)])
+        self.ps = [Process(target=self.worker_func, args=work_remote) for (work_remote) in zip(self.work_remotes)]
+        for p in self.ps:
+            p.start()
 
     def step(self, obs):
-        if self._MOVE_SCREEN.id not in obs.observation.available_actions:
-            return self._SELECT_ARMY
-        marine = self._get_marine(obs)
-        if marine is None:
-            return self._NO_OP
-        marine_coords = self._get_unit_pos(marine)
-        reward = obs.reward
-        is_terminal = reward > 0
-        current_state = np.expand_dims(np.array(obs[3].feature_screen['unit_density']), axis=-1).astype(np.float32)
-        if np.random.uniform() < self.epsilon:
-            current_action = np.random.choice(range(len(self.actions)))
+        if not self.train:
+            if self._MOVE_SCREEN.id not in obs.observation.available_actions:
+                return self._SELECT_ARMY
+            marine = self._get_marine(obs)
+            if marine is None:
+                return self._NO_OP
+            marine_coords = self._get_unit_pos(marine)
+            current_state = np.expand_dims(np.array(obs[3].feature_screen['unit_density']), axis=-1).astype(np.float32)
+            current_action = self.network.predict_policy(x=current_state)
+            return self._dir_to_sc2_action(self.actions[current_action], marine_coords)
+
+        if self.counter == 0:
+            obs_list = self.reset_worker_env()
         else:
-            current_action = np.argmax(self.net.predict_train_model(np.expand_dims(current_state, axis=0))[0])
+            obs_list = self.prev_obs_list
 
-        if self.train and self.prev_state is not None:
-            self.replay_buffer.add(
-                obs_t=self.prev_state,
-                action=self.prev_action,
-                reward=reward,
-                obs_tp1=current_state,
-                done=is_terminal
-            )
-            self.replay_length = len(self.replay_buffer)
-            if self.replay_length > self.min_replay_size:
-                obs_batch, act_batch, rew_batch, next_obs_batch, done_mask, weights, indices = self.replay_buffer.sample(self.batch_size, beta=self.beta)
-                self.beta = min(self.beta_inc + self.beta, 1.0)
+        reward_list = []
+        is_terminal_list = []
+        for i in range(self.num_worker):
+            current_reward = obs_list[i].reward
+            reward, is_terminal = self.calc_reward_terminal(current_reward)
+            reward_list.append(reward)
+            is_terminal_list.append(is_terminal)
 
-                y = self.net.predict_train_model(obs_batch)
-                train_model_prediction = y.copy()
-                next_rows_train = self.net.predict_train_model(next_obs_batch)
-                next_rows_target = self.net.predict_target_model(next_obs_batch)
+        current_states = []
+        current_actions = []
+        current_values = []
 
-                for i in range(np.shape(obs_batch)[0]):
-                    if done_mask[i]:
-                        y[i, act_batch[i]] = rew_batch[i]
-                    else:
-                        max_index_train = np.argmax(next_rows_train[i])
-                        y[i, act_batch[i]] = rew_batch[i] + self.discount_factor * next_rows_target[i][max_index_train]
+        for i in range(self.num_worker):
+            current_state = np.expand_dims(np.expand_dims(np.array(obs_list[i][3].feature_screen['unit_density']), axis=-1).astype(np.float32), axis=0)
+            current_states.append(current_state)
+            current_action, current_value = self.network.predict_both(x=current_state)
+            current_actions.append(current_action[0])
+            current_values.append(current_value[0, 0])
 
-                separated_loss = self.net.mse_numpy(x=train_model_prediction, y=y)
-                priority = separated_loss + self.epsilon_replay
-                self.loss = self.net.train_step_train_model(x=obs_batch, y=y)
-                self.replay_buffer.update_priorities(indices, priority)
+        obs_list = self.step_worker(current_actions)
 
-        self.prev_state = current_state
-        self.prev_action = current_action
-        if is_terminal or obs.last():
-            self.prev_state = None
-        return self._dir_to_sc2_action(self.actions[current_action], marine_coords)
+        # save state + action + reward
+        for i in range(self.num_worker):
+            if not self.new_episode[i]:
+                SAG = SAGTriple(
+                    current_state=self.prev_states[i],
+                    current_action=self.prev_actions[i],
+                    next_reward=reward_list[i],
+                    value=current_values[i]
+                )
+
+                self.episode_replays[i].append(transition=SAG)
+
+                states, gs = self.episode_replays[i].get_batch(self.batch_size)
+                if len(states) > 0:
+                    self.loss = self.network.fit([states, gs])
+            self.new_episode[i] = False
+
+        self.prev_states = current_states
+        self.prev_actions = current_actions
+        self.prev_obs_list = obs_list
+        for i in range(self.num_worker):
+            if is_terminal_list[i] or obs_list[i].last():
+                self.new_episode[i] = True
+
+        self.counter += 1
+
+        all_finished = all([obs.last() for obs in obs_list])
+        return self.loss, np.mean(reward_list), all_finished
 
     def save_model(self, filename):
-        self.net.save_model(filename)
+        self.network.save_model(filename)
 
     def load_model(self, filename):
-        self.net.load_model(filename)
+        self.network.load_model(filename)
 
+    def worker_func(self, remote):
+        # init env
+        env = Env(
+            screen_size=self.screen_size,
+            minimap_size=self.minimap_size,
+            visualize=False
+        )
+        obs = env.reset()
+
+        while True:
+            cmd, action = remote.recv()
+            if cmd == "step":
+                if self._MOVE_SCREEN.id not in obs.observation.available_actions:
+                    action = self._SELECT_ARMY
+                    obs = env.step(action)
+                    remote.send(obs)
+                elif not obs.last():
+                    action = self._dir_to_sc2_action(action, self._get_unit_pos(self._get_marine(obs)))
+                    obs = env.step(action)
+                    remote.send(obs)
+            elif cmd == "reset":
+                obs = env.reset()
+                remote.send(obs)
+            elif cmd == "close":
+                env.close()
+                remote.close()
+            else:
+                raise NotImplementedError
+
+    def reset_worker_env(self):
+        for remote in self.remotes:
+            remote.send(("reset", None))
+        obs = [remote.recv() for remote in self.remotes]
+        return obs
+
+    def step_worker(self, actions=None):
+        actions = [self.actions[action] for action in actions]
+        actions = actions or [None] * self.num_worker
+        for remote, action in zip(self.remotes, actions):
+            remote.send(("step", action))
+        obs = [remote.recv() for remote in self.remotes]
+        return obs
+
+    def close_worker(self):
+        for remote in self.remotes:
+            remote.send(("close", None))
+
+    @staticmethod
+    def calc_reward_terminal(reward):
+        is_terminal = reward > 0
+        if is_terminal:
+            reward = 1.0
+        else:
+            reward = -0.01
+        return reward, is_terminal

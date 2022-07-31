@@ -8,17 +8,21 @@ class SAGTriple:
             current_state: np.ndarray,
             current_action: int,
             next_reward: float,
+            value: float
     ):
         self.current_state = current_state
         self.current_action = current_action
         self.next_reward = next_reward
+        self.value = value
         self.g = None
 
 
 class EpisodeReplayA2C:
-    def __init__(self, n_step):
+    def __init__(self, n_step, gamma):
         self.replay: List[SAGTriple] = []
         self.n_step = n_step
+        self.gamma = gamma
+        self.value = []
 
     def __len__(self):
         return len(self.replay)
@@ -29,11 +33,17 @@ class EpisodeReplayA2C:
     def append(self, transition: SAGTriple):
         self.replay.append(transition)
 
-    def _calculate_g(self, gamma: float, last_v):
+    def _calculate_g(self) -> SAGTriple:
         g = 0
-        for i in range(1, self.n_step):
-            g += self.replay[-self.n_step + i].next_reward * gamma**i
-        g += last_v * gamma**self.n_step
+        terminal_found = False
+        for i in range(0, self.n_step - 1):
+            if self.replay[i].next_reward > 0:
+                terminal_found = True
+                break
+            g += self.replay[i].next_reward * self.gamma**(i + 1)
+
+        if not terminal_found:
+            g += self.replay[self.n_step].value * self.gamma**self.n_step
 
         result_element = self.replay[0]
         result_element.g = g
@@ -43,20 +53,12 @@ class EpisodeReplayA2C:
 
     def get_batch(self, batch_size):
         if len(self.replay) < batch_size + self.n_step:
-            return None
-        batch = []
-        for i in range(batch_size):
-            batch.append(self._calculate_g)
-        return batch
-
-    def get_states(self):
+            return [], []
         states = []
-        for t in range(len(self.replay)):
-            states.append(self.replay[t].current_state)
-        return np.array(states)
+        gs = np.zeros([batch_size, 8])
+        for i in range(batch_size):
+            current_SAG = self._calculate_g()
+            states.append(current_SAG.current_state)
+            gs[i][current_SAG.current_action] = current_SAG.g
 
-    def get_actions(self):
-        actions = []
-        for t in range(len(self.replay)):
-            actions.append(self.replay[t].current_action)
-        return np.array(actions)
+        return np.concatenate(states, axis=0), np.stack(gs)
