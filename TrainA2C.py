@@ -1,7 +1,6 @@
 from absl import app
 from sls import Env
 from sls.agents import *
-from sls.NeuralNetA2C import Network
 from sls.RunnerA2C_2 import RunnerA2C
 
 
@@ -17,8 +16,6 @@ _CONFIG = dict(
     gamma=0.99,
     file_format='.h5'
 )
-
-# network = Network()
 
 
 def main(unused_argv):

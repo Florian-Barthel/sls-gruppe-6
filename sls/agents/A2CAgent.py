@@ -26,6 +26,7 @@ class A2CAgent(AbstractAgent):
         self.batch_size = batch_size
         self.prev_actions = None
         self.prev_states = None
+        self.prev_values = None
         self.loss = 0
         self.network = Network()
         self.episode_replays = [EpisodeReplayA2C(n_step_return, gamma=gamma) for _ in range(num_worker)]
@@ -34,17 +35,14 @@ class A2CAgent(AbstractAgent):
         self.counter = 0
         self.new_episode = [True for _ in range(num_worker)]
 
-        if train:
-            self.epsilon = 1
-        else:
-            self.epsilon = 0
-
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(self.num_worker)])
         self.ps = [Process(target=self.worker_func, args=work_remote) for (work_remote) in zip(self.work_remotes)]
         for p in self.ps:
             p.start()
 
     def step(self, obs):
+
+        # EVALUATION
         if not self.train:
             if self._MOVE_SCREEN.id not in obs.observation.available_actions:
                 return self._SELECT_ARMY
@@ -53,34 +51,27 @@ class A2CAgent(AbstractAgent):
                 return self._NO_OP
             marine_coords = self._get_unit_pos(marine)
             current_state = np.expand_dims(np.array(obs[3].feature_screen['unit_density']), axis=-1).astype(np.float32)
-            current_action = self.network.predict_policy(x=current_state)
-            return self._dir_to_sc2_action(self.actions[current_action], marine_coords)
+            current_action, output_value = self.network.predict_both(x=current_state)
+            return self._dir_to_sc2_action(self.actions[current_action[0, 0]], marine_coords)
 
+        # TRAINING
+        # reset env and select marine in the first iteration
         if self.counter == 0:
             obs_list = self.reset_worker_env()
-        else:
-            obs_list = self.prev_obs_list
+            for i in range(self.num_worker):
+                self.episode_replays[i].reset()
+            self.counter += 1
+            current_actions = []
+            for i in range(self.num_worker):
+                if self._MOVE_SCREEN.id not in obs_list[i].observation.available_actions:
+                    current_actions.append(self._SELECT_ARMY)
+            self.prev_obs_list = self.step_worker(current_actions, obs_list)
+            return 0, 0, False
 
-        reward_list = []
-        is_terminal_list = []
-        for i in range(self.num_worker):
-            current_reward = obs_list[i].reward
-            reward, is_terminal = self.calc_reward_terminal(current_reward)
-            reward_list.append(reward)
-            is_terminal_list.append(is_terminal)
-
-        current_states = []
-        current_actions = []
-        current_values = []
-
-        for i in range(self.num_worker):
-            current_state = np.expand_dims(np.expand_dims(np.array(obs_list[i][3].feature_screen['unit_density']), axis=-1).astype(np.float32), axis=0)
-            current_states.append(current_state)
-            current_action, current_value = self.network.predict_both(x=current_state)
-            current_actions.append(current_action[0])
-            current_values.append(current_value[0, 0])
-
-        obs_list = self.step_worker(current_actions)
+        obs_list = self.prev_obs_list
+        reward_list, is_terminal_list = self.calculate_reward_terminal(obs_list)
+        current_states, current_actions, current_values = self.get_state_action_value(obs_list)
+        obs_list = self.step_worker(current_actions, obs_list)
 
         # save state + action + reward
         for i in range(self.num_worker):
@@ -89,24 +80,24 @@ class A2CAgent(AbstractAgent):
                     current_state=self.prev_states[i],
                     current_action=self.prev_actions[i],
                     next_reward=reward_list[i],
-                    value=current_values[i]
+                    value=self.prev_values[i]
                 )
-
                 self.episode_replays[i].append(transition=SAG)
-
-                states, gs = self.episode_replays[i].get_batch(self.batch_size)
-                if len(states) > 0:
-                    self.loss = self.network.fit([states, gs])
             self.new_episode[i] = False
+
+        aggregated_states, aggregated_gs, aggregated_action_one_hot, batch_not_empty = self.aggregate_batch()
+
+        if batch_not_empty:
+            self.loss = self.network.fit([aggregated_states, aggregated_gs, aggregated_action_one_hot])
 
         self.prev_states = current_states
         self.prev_actions = current_actions
         self.prev_obs_list = obs_list
+        self.prev_values = current_values
+
         for i in range(self.num_worker):
             if is_terminal_list[i] or obs_list[i].last():
                 self.new_episode[i] = True
-
-        self.counter += 1
 
         all_finished = all([obs.last() for obs in obs_list])
         return self.loss, np.mean(reward_list), all_finished
@@ -118,7 +109,6 @@ class A2CAgent(AbstractAgent):
         self.network.load_model(filename)
 
     def worker_func(self, remote):
-        # init env
         env = Env(
             screen_size=self.screen_size,
             minimap_size=self.minimap_size,
@@ -129,12 +119,7 @@ class A2CAgent(AbstractAgent):
         while True:
             cmd, action = remote.recv()
             if cmd == "step":
-                if self._MOVE_SCREEN.id not in obs.observation.available_actions:
-                    action = self._SELECT_ARMY
-                    obs = env.step(action)
-                    remote.send(obs)
-                elif not obs.last():
-                    action = self._dir_to_sc2_action(action, self._get_unit_pos(self._get_marine(obs)))
+                if not obs.last():
                     obs = env.step(action)
                     remote.send(obs)
             elif cmd == "reset":
@@ -143,6 +128,7 @@ class A2CAgent(AbstractAgent):
             elif cmd == "close":
                 env.close()
                 remote.close()
+                break
             else:
                 raise NotImplementedError
 
@@ -152,9 +138,13 @@ class A2CAgent(AbstractAgent):
         obs = [remote.recv() for remote in self.remotes]
         return obs
 
-    def step_worker(self, actions=None):
-        actions = [self.actions[action] for action in actions]
-        actions = actions or [None] * self.num_worker
+    def step_worker(self, input_actions, obs_list):
+        actions = []
+        for i, action in enumerate(input_actions):
+            if hasattr(action, 'function'):
+                actions.append(action)
+            else:
+                actions.append(self._dir_to_sc2_action(self.actions[action], self._get_unit_pos(self._get_marine(obs_list[i]))))
         for remote, action in zip(self.remotes, actions):
             remote.send(("step", action))
         obs = [remote.recv() for remote in self.remotes]
@@ -165,10 +155,53 @@ class A2CAgent(AbstractAgent):
             remote.send(("close", None))
 
     @staticmethod
-    def calc_reward_terminal(reward):
+    def _calc_reward_terminal(reward):
         is_terminal = reward > 0
         if is_terminal:
             reward = 1.0
         else:
             reward = -0.01
         return reward, is_terminal
+
+    def calculate_reward_terminal(self, obs_list):
+        reward_list = []
+        is_terminal_list = []
+        for i in range(self.num_worker):
+            current_reward = obs_list[i].reward
+            reward, is_terminal = self._calc_reward_terminal(current_reward)
+            reward_list.append(reward)
+            is_terminal_list.append(is_terminal)
+        return reward_list, is_terminal_list
+
+    def get_state_action_value(self, obs_list):
+        current_states = []
+        current_actions = []
+        current_values = []
+        for i in range(self.num_worker):
+            current_state = np.expand_dims(np.expand_dims(np.array(obs_list[i][3].feature_screen['unit_density']), axis=-1).astype(np.float32), axis=0)
+            current_states.append(current_state)
+            current_action, current_value = self.network.predict_both(x=current_state)
+            current_actions.append(current_action[0])
+            current_values.append(current_value[0, 0])
+        return current_states, current_actions, current_values
+
+    def aggregate_batch(self):
+        aggregated_states = []
+        aggregated_gs = []
+        aggregated_action_one_hot = []
+        batch_not_empty = False
+
+        for i in range(self.num_worker):
+            states, gs, action_one_hot, empty_batch = self.episode_replays[i].get_batch(self.batch_size)
+            if empty_batch:
+                continue
+            batch_not_empty = True
+            aggregated_states.append(states)
+            aggregated_gs.append(gs)
+            aggregated_action_one_hot.append(action_one_hot)
+
+        if batch_not_empty:
+            aggregated_states = np.concatenate(aggregated_states, axis=0)
+            aggregated_gs = np.concatenate(aggregated_gs, axis=0)
+            aggregated_action_one_hot = np.concatenate(aggregated_action_one_hot, axis=0)
+        return aggregated_states, aggregated_gs, aggregated_action_one_hot, batch_not_empty

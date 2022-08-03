@@ -29,7 +29,7 @@ class RunnerA2C:
 
         self.writer = tf.summary.FileWriter(self.path, tf.get_default_graph())
         if not self.train and load_path is not None and os.path.isdir(load_path):
-                self.agent.load_model(load_path)
+            self.agent.load_model(load_path)
 
     def summarize(self):
         self.writer.add_summary(tf.Summary(
