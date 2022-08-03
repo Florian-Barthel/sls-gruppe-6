@@ -35,14 +35,14 @@ class EpisodeReplayA2C:
     def _calculate_g(self) -> SAGTriple:
         g = 0
         terminal_found = False
-        for i in range(0, self.n_step): # oder n_step -1 ?
+        for i in range(self.n_step): # oder n_step -1 ?
             g += self.replay[i].next_reward * self.gamma**(i + 1)
             if self.replay[i].next_reward > 0:
                 terminal_found = True
                 break
 
         if not terminal_found:
-            g += self.replay[self.n_step].value * self.gamma**(self.n_step + 1)
+            g += self.replay[self.n_step].value * self.gamma**self.n_step
 
         result_element = self.replay.pop(0)
         result_element.g = g
